@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Whisper 데모</title>
+<style>
+  body { margin: 0; min-height: 100vh; box-sizing: border-box; display: grid; place-content: center; gap: 28px; text-align: center;
+         font-family: "Malgun Gothic", system-ui, sans-serif; background: #f4f7f9; color: #1b2a33; padding: 16px; }
+  button { font: inherit; font-size: 1.3rem; font-weight: 700; color: #fff; background: #003f59;
+           border: 0; border-radius: 999px; padding: 18px 40px; cursor: pointer; }
+  button.rec { background: #d23b3b; }
+  button:disabled { opacity: .4; cursor: wait; }
+  #out { font-size: 2.4rem; font-weight: 700; min-height: 1.4em; max-width: 900px; }
+  #msg { color: #5d6f7a; }
+</style>
+</head>
+<body>
+  <div id="out"></div>
+  <div><button id="btn" disabled>● 말하기</button></div>
+  <div id="msg">모델 불러오는 중…</div>
+
+<script type="module">
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
+
+const btn = document.getElementById("btn"), out = document.getElementById("out"), msg = document.getElementById("msg");
+const asr = await pipeline("automatic-speech-recognition", "onnx-community/whisper-base",
+  { dtype: { encoder_model: "q8", decoder_model_merged: "q8" } });
+btn.disabled = false; msg.textContent = "버튼을 누르고 말한 뒤, 다시 누르세요";
+
+let rec, chunks;
+btn.onclick = async () => {
+  if (rec?.state === "recording") return rec.stop();
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  rec = new MediaRecorder(stream); chunks = [];
+  rec.ondataavailable = (e) => chunks.push(e.data);
+  rec.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    btn.classList.remove("rec"); btn.textContent = "● 말하기"; btn.disabled = true; msg.textContent = "인식 중…";
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    const audio = (await ctx.decodeAudioData(await new Blob(chunks).arrayBuffer())).getChannelData(0);
+    const { text } = await asr(audio, { language: "korean", task: "transcribe" });
+    out.textContent = text.trim();
+    btn.disabled = false; msg.textContent = "버튼을 누르고 말한 뒤, 다시 누르세요";
+  };
+  rec.start(); btn.classList.add("rec"); btn.textContent = "■ 멈추기"; msg.textContent = "듣는 중…";
+};
+</script>
+</body>
+</html>
