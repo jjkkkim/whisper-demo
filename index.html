@@ -5,45 +5,74 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Whisper 데모</title>
 <style>
-  body { margin: 0; min-height: 100vh; box-sizing: border-box; display: grid; place-content: center; gap: 28px; text-align: center;
+  body { margin: 0; min-height: 100vh; box-sizing: border-box; display: grid; place-content: center; gap: 24px; text-align: center;
          font-family: "Malgun Gothic", system-ui, sans-serif; background: #f4f7f9; color: #1b2a33; padding: 16px; }
+  h1 { margin: 0; font-size: 1.3rem; color: #003f59; }
+  .label { font-size: .9rem; color: #5d6f7a; margin-bottom: 6px; }
+  #out { width: min(800px, 90vw); min-height: 3.2em; box-sizing: border-box; padding: 18px 22px; border-radius: 12px;
+         background: #fff; border: 2px solid #d6e0e6; font-size: 2.2rem; font-weight: 700; display: grid; place-items: center; }
+  #out.empty { color: #a7b6be; font-size: 1.2rem; font-weight: 400; }
+  #out.err { color: #d23b3b; font-size: 1.1rem; font-weight: 400; }
   button { font: inherit; font-size: 1.3rem; font-weight: 700; color: #fff; background: #003f59;
            border: 0; border-radius: 999px; padding: 18px 40px; cursor: pointer; }
   button.rec { background: #d23b3b; }
   button:disabled { opacity: .4; cursor: wait; }
-  #out { font-size: 2.4rem; font-weight: 700; min-height: 1.4em; max-width: 900px; }
   #msg { color: #5d6f7a; }
 </style>
 </head>
 <body>
-  <div id="out"></div>
+  <h1>Whisper 음성인식 데모</h1>
+  <div>
+    <div class="label">인식 결과</div>
+    <div id="out" class="empty">여기에 인식된 텍스트가 표시됩니다</div>
+  </div>
   <div><button id="btn" disabled>● 말하기</button></div>
-  <div id="msg">모델 불러오는 중…</div>
+  <div id="msg">모델 불러오는 중… (처음 한 번 약 80MB)</div>
 
 <script type="module">
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js";
 
 const btn = document.getElementById("btn"), out = document.getElementById("out"), msg = document.getElementById("msg");
-const asr = await pipeline("automatic-speech-recognition", "onnx-community/whisper-base",
-  { dtype: { encoder_model: "q8", decoder_model_merged: "q8" } });
-btn.disabled = false; msg.textContent = "버튼을 누르고 말한 뒤, 다시 누르세요";
+const READY = "버튼을 누르고 말한 뒤, 다시 누르세요";
+const show = (text, cls = "") => { out.className = cls; out.textContent = text; };
+
+let asr;
+try {
+  asr = await pipeline("automatic-speech-recognition", "onnx-community/whisper-base",
+    { dtype: { encoder_model: "q8", decoder_model_merged: "q8" } });
+  btn.disabled = false; msg.textContent = READY;
+} catch (e) {
+  show("모델을 불러오지 못했습니다: " + e.message, "err"); msg.textContent = "인터넷 연결을 확인하고 새로고침해 주세요";
+}
 
 let rec, chunks;
 btn.onclick = async () => {
   if (rec?.state === "recording") return rec.stop();
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    show("마이크를 쓸 수 없습니다. 주소창 왼쪽 아이콘에서 마이크를 ‘허용’으로 바꿔 주세요.", "err");
+    return;
+  }
   rec = new MediaRecorder(stream); chunks = [];
   rec.ondataavailable = (e) => chunks.push(e.data);
   rec.onstop = async () => {
     stream.getTracks().forEach((t) => t.stop());
-    btn.classList.remove("rec"); btn.textContent = "● 말하기"; btn.disabled = true; msg.textContent = "인식 중…";
-    const ctx = new AudioContext({ sampleRate: 16000 });
-    const audio = (await ctx.decodeAudioData(await new Blob(chunks).arrayBuffer())).getChannelData(0);
-    const { text } = await asr(audio, { language: "korean", task: "transcribe" });
-    out.textContent = text.trim();
-    btn.disabled = false; msg.textContent = "버튼을 누르고 말한 뒤, 다시 누르세요";
+    btn.classList.remove("rec"); btn.textContent = "● 말하기"; btn.disabled = true;
+    show("인식 중…", "empty"); msg.textContent = "인식 중…";
+    try {
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      const audio = (await ctx.decodeAudioData(await new Blob(chunks).arrayBuffer())).getChannelData(0);
+      const { text } = await asr(audio, { language: "korean", task: "transcribe" });
+      text.trim() ? show(text.trim()) : show("음성이 인식되지 않았습니다. 조금 더 크게 말해 보세요.", "empty");
+    } catch (e) {
+      show("인식 중 오류: " + e.message, "err");
+    }
+    btn.disabled = false; msg.textContent = READY;
   };
-  rec.start(); btn.classList.add("rec"); btn.textContent = "■ 멈추기"; msg.textContent = "듣는 중…";
+  rec.start(); btn.classList.add("rec"); btn.textContent = "■ 멈추기";
+  show("듣는 중… 말을 마치면 ‘멈추기’를 누르세요", "empty"); msg.textContent = "듣는 중…";
 };
 </script>
 </body>
